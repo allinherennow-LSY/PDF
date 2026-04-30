@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF 지식 추출기 | DeepMind Edition</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        
+        :root {
+            --dm-gradient: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #312e81 100%);
+            --accent-glow: radial-gradient(circle at 50% 50%, rgba(99, 102, 241, 0.15), transparent 50%);
+        }
+
+        body { 
+            font-family: 'Inter', sans-serif;
+            background: #0b0f1a;
+            color: #e2e8f0;
+            overflow-x: hidden;
+        }
+
+        .mesh-bg {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: -1;
+            background: var(--dm-gradient);
+        }
+
+        .mesh-bg::after {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: 
+                radial-gradient(circle at 20% 30%, rgba(79, 70, 229, 0.4) 0%, transparent 40%),
+                radial-gradient(circle at 80% 70%, rgba(6, 182, 212, 0.3) 0%, transparent 40%);
+            filter: blur(80px);
+        }
+
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.03);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+        }
+
+        .gradient-text {
+            background: linear-gradient(90deg, #818cf8, #22d3ee);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .chat-container::-webkit-scrollbar { width: 4px; }
+        .chat-container::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.1); border-radius: 10px; }
+        
+        .pulse-border {
+            position: relative;
+        }
+        .pulse-border::after {
+            content: '';
+            position: absolute;
+            inset: -2px;
+            border-radius: inherit;
+            background: linear-gradient(90deg, #6366f1, #06b6d4);
+            z-index: -1;
+            opacity: 0.3;
+            animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 0.3; transform: scale(1); }
+            50% { opacity: 0.1; transform: scale(1.01); }
+        }
+
+        .loading-dots span {
+            animation: blink 1.4s infinite both;
+        }
+        .loading-dots span:nth-child(2) { animation-delay: 0.2s; }
+        .loading-dots span:nth-child(3) { animation-delay: 0.4s; }
+
+        @keyframes blink {
+            0% { opacity: .2; }
+            20% { opacity: 1; }
+            100% { opacity: .2; }
+        }
+    </style>
+</head>
+<body class="min-h-screen">
+    <div class="mesh-bg"></div>
+
+    <div class="max-w-6xl mx-auto p-6 md:p-12 relative z-10">
+        <!-- Header -->
+        <header class="mb-12 flex flex-col items-center">
+            <div class="w-12 h-12 mb-4 bg-gradient-to-tr from-indigo-500 to-cyan-400 rounded-full flex items-center justify-center shadow-lg shadow-indigo-500/20">
+                <svg class="w-7 h-7 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+            </div>
+            <h1 class="text-4xl font-extrabold tracking-tight mb-2 text-white">PDF <span class="gradient-text">Knowledge</span> Extractor</h1>
+            <p class="text-slate-400 font-light tracking-wide">DeepMind Style Intelligent Document Analysis</p>
+        </header>
+
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
+            <!-- Left Sidebar -->
+            <div class="lg:col-span-4 space-y-6">
+                <div class="glass-panel p-6 rounded-3xl">
+                    <h2 class="text-sm font-semibold uppercase tracking-widest text-indigo-400 mb-6 flex items-center">
+                        <span class="w-2 h-2 bg-indigo-400 rounded-full mr-2"></span>
+                        Document Source
+                    </h2>
+                    
+                    <div id="drop-zone" class="relative group border border-dashed border-white/10 rounded-2xl p-10 text-center cursor-pointer hover:border-indigo-400/50 hover:bg-white/5 transition-all duration-300">
+                        <input type="file" id="file-input" class="hidden" accept=".pdf">
+                        <div class="mb-4 flex justify-center">
+                            <div class="w-12 h-12 bg-white/5 rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform duration-300">
+                                <svg class="w-6 h-6 text-slate-300 group-hover:text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
+                            </div>
+                        </div>
+                        <p class="text-sm text-slate-300 font-medium">Click or drag PDF</p>
+                        <p class="text-xs text-slate-500 mt-1">Smart context limit: 100k tokens</p>
+                    </div>
+
+                    <div id="file-info" class="mt-6 hidden">
+                        <div class="flex items-center p-4 bg-white/5 rounded-2xl border border-white/5">
+                            <div class="flex-shrink-0 w-10 h-10 bg-indigo-500/10 rounded-lg flex items-center justify-center mr-4">
+                                <svg class="w-6 h-6 text-indigo-400" fill="currentColor" viewBox="0 0 20 20"><path d="M9 2a2 2 0 00-2 2v8a2 2 0 002 2h6a2 2 0 002-2V6.414A2 2 0 0016.414 5L14 2.586A2 2 0 0012.586 2H9z"></path></svg>
+                            </div>
+                            <div class="min-w-0 flex-1">
+                                <p id="file-name" class="text-sm font-semibold truncate text-white"></p>
+                                <p id="file-status" class="text-[11px] text-indigo-400 font-bold uppercase tracking-wider mt-0.5">READY</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="glass-panel p-6 rounded-3xl">
+                    <h2 class="text-sm font-semibold uppercase tracking-widest text-cyan-400 mb-4 flex items-center">
+                        <span class="w-2 h-2 bg-cyan-400 rounded-full mr-2"></span>
+                        Auto Summary
+                    </h2>
+                    <div id="summary-content" class="text-sm text-slate-400 leading-relaxed min-h-[120px] font-light italic">
+                        Upload a file to initialize neural analysis...
+                    </div>
+                </div>
+            </div>
+
+            <!-- Chat Interface -->
+            <div class="lg:col-span-8 flex flex-col h-[650px]">
+                <div class="glass-panel flex-1 rounded-[32px] overflow-hidden flex flex-col">
+                    <div class="px-6 py-5 border-b border-white/5 flex justify-between items-center bg-white/5">
+                        <h2 class="font-bold text-white tracking-tight flex items-center">
+                            Neural Insights
+                        </h2>
+                        <div class="flex items-center gap-2">
+                            <div class="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
+                            <span class="text-[10px] font-bold text-emerald-500 uppercase tracking-widest">Active System</span>
+                        </div>
+                    </div>
+                    
+                    <div id="chat-window" class="chat-container flex-1 overflow-y-auto p-6 space-y-6">
+                        <div class="flex justify-start">
+                            <div class="bg-white/5 border border-white/5 p-4 rounded-2xl rounded-tl-none max-w-[80%] text-sm text-slate-300 leading-relaxed">
+                                Welcome. I am the Gemini-powered knowledge extractor. 
+                                <br><br>
+                                Please upload a PDF to begin the synthesis of information and collaborative querying.
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="p-6 bg-transparent">
+                        <form id="chat-form" class="relative">
+                            <input type="text" id="user-input" placeholder="Ask anything about the document..." 
+                                class="w-full bg-white/5 border border-white/10 rounded-2xl px-6 py-4 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500/50 focus:ring-4 focus:ring-indigo-500/5 transition-all disabled:opacity-30" disabled>
+                            <button type="submit" id="send-btn" 
+                                class="absolute right-2 top-2 bg-gradient-to-tr from-indigo-600 to-indigo-500 text-white p-2.5 rounded-xl hover:shadow-lg hover:shadow-indigo-500/20 active:scale-95 transition-all disabled:opacity-30" disabled>
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notifications -->
+    <div id="toast" class="fixed bottom-8 left-1/2 -translate-x-1/2 bg-indigo-600 text-white px-8 py-3 rounded-2xl text-sm font-semibold shadow-2xl transition-all duration-500 transform translate-y-20 opacity-0 z-50">
+        Message
+    </div>
+
+    <script>
+        // Configuration
+        const apiKey = ""; // API key is provided by the execution environment
+        const modelName = "gemini-2.5-flash-preview-09-2025";
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+        // Application State
+        let pdfText = "";
+        let isProcessing = false;
+
+        // Element Selectors
+        const dropZone = document.getElementById('drop-zone');
+        const fileInput = document.getElementById('file-input');
+        const fileInfo = document.getElementById('file-info');
+        const fileNameDisplay = document.getElementById('file-name');
+        const fileStatus = document.getElementById('file-status');
+        const summaryContent = document.getElementById('summary-content');
+        const chatWindow = document.getElementById('chat-window');
+        const chatForm = document.getElementById('chat-form');
+        const userInput = document.getElementById('user-input');
+        const sendBtn = document.getElementById('send-btn');
+        const toast = document.getElementById('toast');
+
+        // Notification Utility
+        function showToast(message) {
+            toast.innerText = message;
+            toast.classList.remove('opacity-0', 'translate-y-20');
+            toast.classList.add('opacity-100', 'translate-y-0');
+            setTimeout(() => {
+                toast.classList.add('opacity-0', 'translate-y-20');
+                toast.classList.remove('opacity-100', 'translate-y-0');
+            }, 4000);
+        }
+
+        // Gemini API Interaction with Exponential Backoff
+        async function callGemini(prompt, systemPrompt = "You are a helpful expert assistant.") {
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
+            
+            const payload = {
+                contents: [{ parts: [{ text: prompt }] }],
+                systemInstruction: { parts: [{ text: systemPrompt }] }
+            };
+
+            const retries = 5;
+            for (let i = 0; i < retries; i++) {
+                try {
+                    const response = await fetch(url, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+
+                    if (response.ok) {
+                        const data = await response.json();
+                        // Corrected: Standard optional chaining for Gemini API response
+                        const result = data.candidates && data.candidates && data.candidates.content && data.candidates.content.parts && data.candidates.content.parts ? data.candidates.content.parts.text : null;
+                        return result || "Could not generate a response.";
+                    }
+                    
+                    if (response.status === 429 || response.status >= 500) {
+                        const delay = Math.pow(2, i) * 1000;
+                        await new Promise(res => setTimeout(res, delay));
+                        continue;
+                    }
+
+                    throw new Error(`API Connection Error (${response.status})`);
+                } catch (error) {
+                    if (i === retries - 1) throw error;
+                }
+            }
+        }
+
+        // PDF Text Extraction Logic
+        async function extractTextFromPDF(file) {
+            try {
+                const arrayBuffer = await file.arrayBuffer();
+                const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+                let fullText = "";
+
+                for (let i = 1; i <= pdf.numPages; i++) {
+                    const page = await pdf.getPage(i);
+                    const content = await page.getTextContent();
+                    const pageText = content.items.map(item => item.str).join(" ");
+                    fullText += pageText + "\n";
+                }
+                return fullText.trim();
+            } catch (error) {
+                console.error("PDF Parsing Error:", error);
+                throw new Error("Failed to extract text from the PDF file.");
+            }
+        }
+
+        // Orchestrator for File Processing
+        async function handlePDFUpload(file) {
+            if (!file || file.type !== 'application/pdf') {
+                showToast("Please provide a valid PDF file.");
+                return;
+            }
+            
+            if (isProcessing) return;
+            isProcessing = true;
+            
+            // UI State Update
+            fileInfo.classList.remove('hidden');
+            fileNameDisplay.textContent = file.name;
+            fileStatus.textContent = "Analyzing Neural Pathways...";
+            summaryContent.innerHTML = `
+                <div class="space-y-2 animate-pulse">
+                    <div class="h-3 bg-white/10 rounded w-full"></div>
+                    <div class="h-3 bg-white/10 rounded w-4/5"></div>
+                    <div class="h-3 bg-white/10 rounded w-2/3"></div>
+                </div>`;
+            
+            try {
+                pdfText = await extractTextFromPDF(file);
+                fileStatus.textContent = "Synthesizing...";
+                
+                // Content summary using Gemini (limited context for summary)
+                const textSnippet = pdfText.slice(0, 50000); 
+                const summary = await callGemini(
+                    `다음 문서 내용을 분석하여 핵심 요약 3가지를 불렛포인트 형식으로 작성해줘:\n\n${textSnippet}`,
+                    "당신은 구글 딥마인드의 수석 연구원입니다. 전문적이고 간결하게 한국어로 답변하세요."
+                );
+
+                summaryContent.textContent = summary;
+                fileStatus.textContent = "Analysis Complete";
+                userInput.disabled = false;
+                sendBtn.disabled = false;
+                showToast("Knowledge extraction successful.");
+
+            } catch (error) {
+                fileStatus.textContent = "Extraction Failed";
+                summaryContent.textContent = "Error: " + error.message;
+                showToast(error.message);
+            } finally {
+                isProcessing = false;
+            }
+        }
+
+        // Chat UI Helpers
+        function appendMessage(role, text) {
+            const wrapper = document.createElement('div');
+            wrapper.className = `flex ${role === 'user' ? 'justify-end' : 'justify-start'}`;
+            
+            const msg = document.createElement('div');
+            msg.className = role === 'user' 
+                ? 'bg-indigo-600/80 text-white rounded-2xl rounded-tr-none px-4 py-3 shadow-lg shadow-indigo-500/10 max-w-[85%] text-sm'
+                : 'bg-white/5 border border-white/5 text-slate-300 rounded-2xl rounded-tl-none px-4 py-3 max-w-[85%] text-sm leading-relaxed';
+            
+            msg.textContent = text;
+            wrapper.appendChild(msg);
+            chatWindow.appendChild(wrapper);
+            chatWindow.scrollTo({ top: chatWindow.scrollHeight, behavior: 'smooth' });
+        }
+
+        // Event Handlers
+        dropZone.addEventListener('click', () => fileInput.click());
+        
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('border-indigo-400', 'bg-white/5');
+        });
+
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('border-indigo-400', 'bg-white/5');
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('border-indigo-400', 'bg-white/5');
+            // Corrected: Access the first file from the FileList object
+            const file = e.dataTransfer.files;
+            if (file) handlePDFUpload(file);
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            // Corrected: Access the first file from the FileList object
+            const file = e.target.files;
+            if (file) handlePDFUpload(file);
+        });
+
+        chatForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const question = userInput.value.trim();
+            if (!question || isProcessing) return;
+
+            appendMessage('user', question);
+            userInput.value = "";
+            
+            // Loading placeholder
+            const loadingMsg = document.createElement('div');
+            loadingMsg.className = "flex justify-start";
+            loadingMsg.innerHTML = `
+                <div class="bg-white/5 border border-white/5 p-4 rounded-2xl rounded-tl-none text-xs text-indigo-400 tracking-widest font-bold uppercase flex items-center gap-2">
+                    Processing
+                    <span class="loading-dots"><span>.</span><span>.</span><span>.</span></span>
+                </div>`;
+            chatWindow.appendChild(loadingMsg);
+            chatWindow.scrollTop = chatWindow.scrollHeight;
+
+            try {
+                // Use a larger context for the actual chat
+                const contextText = pdfText.slice(0, 150000);
+                const prompt = `제공된 지식 베이스를 바탕으로 질문에 답하세요.\n\n[Knowledge Base]:\n${contextText}\n\n[Question]:\n${question}`;
+                
+                const answer = await callGemini(prompt, "제공된 정보 내에서만 답변하세요. 정보가 없다면 정중히 모른다고 답하세요. 답변은 항상 한국어로 하세요.");
+                
+                chatWindow.removeChild(loadingMsg);
+                appendMessage('ai', answer);
+            } catch (error) {
+                if (loadingMsg.parentNode) chatWindow.removeChild(loadingMsg);
+                appendMessage('ai', "Neural connection timed out. Please try again.");
+                showToast("Inference failed.");
+            }
+        });
+    </script>
+</body>
+</html>
